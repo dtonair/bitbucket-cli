@@ -1,0 +1,55 @@
+version: 2
+
+project_name: bitbucket-cli
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: bitbucket-cli
+    main: .
+    binary: bitbucket-cli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X bitbucket-cli/cmd.version={{ .Version }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+brews:
+  - name: bitbucket-cli
+    repository:
+      owner: dtonair
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/dtonair/bitbucket-cli"
+    description: "Bitbucket Cloud CLI for agents and humans"
+    license: "MIT"
+    directory: Formula
+    install: |
+      bin.install "bitbucket-cli"
+    test: |
+      system "#{bin}/bitbucket-cli", "--version"

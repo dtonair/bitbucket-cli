@@ -8,7 +8,18 @@ Output is **JSON by default** (easy for agents to parse); pass `--pretty` for
 human-readable text. Errors are written as a JSON envelope to stderr with a
 non-zero exit code.
 
-## Install / Build
+## Install
+
+### Homebrew
+
+```bash
+brew tap dtonair/tap
+brew install bitbucket-cli
+```
+
+Upgrade later with `brew upgrade bitbucket-cli`.
+
+### Build from source
 
 ```bash
 cd ~/code/bitbucket-cli
