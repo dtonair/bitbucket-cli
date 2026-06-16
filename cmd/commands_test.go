@@ -1,0 +1,195 @@
+package cmd
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+	"testing"
+)
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func jsonResp(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+	}
+}
+
+// run executes the root command with args, capturing stdout. The stub
+// transport (may be nil) handles HTTP and can record the last request.
+func run(t *testing.T, transport roundTripFunc, args ...string) (string, error) {
+	t.Helper()
+
+	t.Setenv("BITBUCKET_EMAIL", "dev@example.com")
+	t.Setenv("BITBUCKET_API_TOKEN", "token")
+	t.Setenv("BITBUCKET_DEFAULT_WORKSPACE", "team")
+	t.Setenv("BITBUCKET_DEFAULT_REPO", "repo")
+
+	// Reset global flag state between runs.
+	flagWorkspace, flagRepo, flagPretty = "", "", false
+	testTransport = transport
+	t.Cleanup(func() { testTransport = nil })
+
+	origStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	rootCmd.SetArgs(args)
+	err := rootCmd.Execute()
+
+	w.Close()
+	os.Stdout = origStdout
+	out, _ := io.ReadAll(r)
+	return string(out), err
+}
+
+func TestStatusJSON(t *testing.T) {
+	out, err := run(t, nil, "status")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(out), &m); err != nil {
+		t.Fatalf("not json: %v\n%s", err, out)
+	}
+	if m["configured"] != true || m["defaultRepo"] != "team/repo" {
+		t.Fatalf("unexpected status: %v", m)
+	}
+}
+
+func TestStatusMissingCredsFails(t *testing.T) {
+	os.Unsetenv("BITBUCKET_EMAIL")
+	t.Setenv("BITBUCKET_API_TOKEN", "token")
+	// Explicitly clear email even though Setenv above set token.
+	t.Setenv("BITBUCKET_EMAIL", "")
+	flagWorkspace, flagRepo, flagPretty = "", "", false
+	rootCmd.SetArgs([]string{"status"})
+	if err := rootCmd.Execute(); err == nil {
+		t.Fatal("expected error when credentials missing")
+	}
+}
+
+func TestPRListPathAndQuery(t *testing.T) {
+	var gotURL string
+	out, err := run(t, func(r *http.Request) (*http.Response, error) {
+		gotURL = r.URL.String()
+		return jsonResp(200, `{"values":[{"id":1,"title":"A","state":"OPEN"},{"id":2,"title":"B","state":"OPEN"}]}`), nil
+	}, "pr", "list", "--state", "OPEN", "--limit", "5")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(gotURL, "/repositories/team/repo/pullrequests") {
+		t.Fatalf("unexpected path: %s", gotURL)
+	}
+	if !strings.Contains(gotURL, "state=OPEN") || !strings.Contains(gotURL, "pagelen=50") {
+		t.Fatalf("query missing params: %s", gotURL)
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(out), &arr); err != nil {
+		t.Fatalf("not json array: %v\n%s", err, out)
+	}
+	if len(arr) != 2 {
+		t.Fatalf("expected 2 PRs, got %d", len(arr))
+	}
+}
+
+func TestPRListPretty(t *testing.T) {
+	out, err := run(t, func(r *http.Request) (*http.Response, error) {
+		return jsonResp(200, `{"values":[{"id":12,"title":"Fix","state":"OPEN"}]}`), nil
+	}, "pr", "list", "--pretty")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.TrimSpace(out) != "#12 Fix [OPEN]" {
+		t.Fatalf("unexpected pretty output: %q", out)
+	}
+}
+
+func TestPRGetInvalidID(t *testing.T) {
+	_, err := run(t, nil, "pr", "get", "abc")
+	if err == nil {
+		t.Fatal("expected error for non-numeric id")
+	}
+}
+
+func TestRepoGet(t *testing.T) {
+	var gotURL string
+	out, err := run(t, func(r *http.Request) (*http.Response, error) {
+		gotURL = r.URL.String()
+		return jsonResp(200, `{"full_name":"team/repo","name":"repo"}`), nil
+	}, "repo", "get", "--pretty")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotURL != "https://api.bitbucket.org/2.0/repositories/team/repo" {
+		t.Fatalf("unexpected url: %s", gotURL)
+	}
+	if strings.TrimSpace(out) != "Repository: team/repo" {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestBranchListQuery(t *testing.T) {
+	var gotURL string
+	_, err := run(t, func(r *http.Request) (*http.Response, error) {
+		gotURL = r.URL.String()
+		return jsonResp(200, `{"values":[{"name":"main"}]}`), nil
+	}, "branch", "list", "--query", `name ~ "feature/"`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(gotURL, "/refs/branches") || !strings.Contains(gotURL, "q=") {
+		t.Fatalf("unexpected url: %s", gotURL)
+	}
+}
+
+func TestPRCommentPostsBody(t *testing.T) {
+	var gotURL, gotMethod string
+	var gotBody []byte
+	out, err := run(t, func(r *http.Request) (*http.Response, error) {
+		gotURL = r.URL.String()
+		gotMethod = r.Method
+		gotBody, _ = io.ReadAll(r.Body)
+		return jsonResp(201, `{"id":99}`), nil
+	}, "pr", "comment", "123", "--body", "Looks good", "--pretty")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Fatalf("expected POST, got %s", gotMethod)
+	}
+	if !strings.Contains(gotURL, "/pullrequests/123/comments") {
+		t.Fatalf("unexpected url: %s", gotURL)
+	}
+	var sent map[string]any
+	if err := json.Unmarshal(gotBody, &sent); err != nil {
+		t.Fatalf("body not json: %v", err)
+	}
+	content := sent["content"].(map[string]any)
+	if content["raw"] != "Looks good" || content["markup"] != "markdown" {
+		t.Fatalf("unexpected body: %s", gotBody)
+	}
+	if strings.TrimSpace(out) != "Posted comment #99 on pull request #123." {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestPRCommentEmptyBodyFails(t *testing.T) {
+	called := false
+	_, err := run(t, func(r *http.Request) (*http.Response, error) {
+		called = true
+		return jsonResp(201, `{}`), nil
+	}, "pr", "comment", "123", "--body", "   ")
+	if err == nil {
+		t.Fatal("expected error for empty body")
+	}
+	if called {
+		t.Fatal("should not call API for empty body")
+	}
+}
