@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"bitbucket-cli/internal/bitbucket"
-	"bitbucket-cli/internal/config"
-	"bitbucket-cli/internal/output"
+	"bitbucket-cli/bitbucket"
+	"bitbucket-cli/config"
+	"bitbucket-cli/output"
 
 	"github.com/spf13/cobra"
 )

@@ -3,8 +3,8 @@ package cmd
 import (
 	"encoding/json"
 
-	"bitbucket-cli/internal/bitbucket"
-	"bitbucket-cli/internal/output"
+	"bitbucket-cli/bitbucket"
+	"bitbucket-cli/output"
 
 	"github.com/spf13/cobra"
 )

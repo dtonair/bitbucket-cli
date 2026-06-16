@@ -14,7 +14,7 @@ import (
 	"net/url"
 	"strings"
 
-	"bitbucket-cli/internal/config"
+	"bitbucket-cli/config"
 )
 
 // APIBaseURL is the Bitbucket Cloud REST 2.0 base.

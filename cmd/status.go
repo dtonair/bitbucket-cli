@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"bitbucket-cli/internal/config"
-	"bitbucket-cli/internal/output"
+	"bitbucket-cli/config"
+	"bitbucket-cli/output"
 
 	"github.com/spf13/cobra"
 )
