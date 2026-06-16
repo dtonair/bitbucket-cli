@@ -2,13 +2,27 @@ package cmd
 
 import (
 	"os"
+	"runtime/debug"
 
 	"github.com/spf13/cobra"
 )
 
-// version is the bitbucket-cli release version. Overridable at build time via
-// -ldflags "-X bitbucket-cli/cmd.version=...".
-var version = "0.1.0"
+// version is the bitbucket-cli release version. Release builds set it via
+// -ldflags "-X github.com/dtonair/bitbucket-cli/cmd.version=...". For
+// `go install`-ed builds it falls back to the module version from build info.
+var version = "dev"
+
+// resolveVersion prefers the ldflag-injected version and otherwise reports the
+// module version recorded by `go install` (e.g. v0.1.0).
+func resolveVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return version
+}
 
 // Persistent flags shared by all subcommands.
 var (
@@ -21,7 +35,7 @@ var rootCmd = &cobra.Command{
 	Use:           "bitbucket-cli",
 	Short:         "Bitbucket Cloud CLI for agents and humans",
 	Long:          "bitbucket-cli exposes Bitbucket Cloud pull requests, branches, and repo\ninfo as scriptable commands. Output is JSON by default; pass --pretty for\nhuman-readable text. Credentials come from environment variables.",
-	Version:       version,
+	Version:       resolveVersion(),
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }

@@ -1,4 +1,4 @@
-module bitbucket-cli
+module github.com/dtonair/bitbucket-cli
 
 go 1.24.5
 

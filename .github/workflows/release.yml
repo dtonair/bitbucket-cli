@@ -29,9 +29,5 @@ jobs:
           version: "~> v2"
           args: release --clean
         env:
-          # Pushes the GitHub Release to this repo.
+          # Pushes the GitHub Release (with prebuilt binaries) to this repo.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Commits the generated formula to the dtonair/homebrew-tap repo.
-          # Create a fine-grained/classic PAT with `repo` (or contents:write on
-          # the tap repo) and add it as a repo secret named TAP_GITHUB_TOKEN.
-          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}

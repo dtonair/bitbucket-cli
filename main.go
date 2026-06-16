@@ -1,6 +1,6 @@
 package main
 
-import "bitbucket-cli/cmd"
+import "github.com/dtonair/bitbucket-cli/cmd"
 
 func main() {
 	cmd.Execute()

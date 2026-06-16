@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"bitbucket-cli/config"
-	"bitbucket-cli/output"
+	"github.com/dtonair/bitbucket-cli/config"
+	"github.com/dtonair/bitbucket-cli/output"
 
 	"github.com/spf13/cobra"
 )

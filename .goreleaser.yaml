@@ -19,7 +19,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X bitbucket-cli/cmd.version={{ .Version }}
+      - -s -w -X github.com/dtonair/bitbucket-cli/cmd.version=v{{ .Version }}
 
 archives:
   - id: default
@@ -38,18 +38,3 @@ changelog:
       - "^docs:"
       - "^test:"
       - "^chore:"
-
-brews:
-  - name: bitbucket-cli
-    repository:
-      owner: dtonair
-      name: homebrew-tap
-      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
-    homepage: "https://github.com/dtonair/bitbucket-cli"
-    description: "Bitbucket Cloud CLI for agents and humans"
-    license: "MIT"
-    directory: Formula
-    install: |
-      bin.install "bitbucket-cli"
-    test: |
-      system "#{bin}/bitbucket-cli", "--version"

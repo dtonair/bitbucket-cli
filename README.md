@@ -10,14 +10,20 @@ non-zero exit code.
 
 ## Install
 
-### Homebrew
+### go install
 
 ```bash
-brew tap dtonair/tap
-brew install bitbucket-cli
+go install github.com/dtonair/bitbucket-cli@latest
 ```
 
-Upgrade later with `brew upgrade bitbucket-cli`.
+Installs the latest tagged release into `$GOBIN`. Requires Go 1.24+. Pin a
+specific version with `@v0.1.0`.
+
+### Prebuilt binary
+
+Download a tarball for your OS/arch from the
+[Releases page](https://github.com/dtonair/bitbucket-cli/releases), extract it,
+and put `bitbucket-cli` on your `PATH`. No Go toolchain required.
 
 ### Build from source
 
@@ -28,7 +34,7 @@ go build -o bitbucket-cli .      # local binary
 go install .                     # into $GOBIN
 ```
 
-Requires Go 1.24+. The only third-party dependency is `spf13/cobra`.
+The only third-party dependency is `spf13/cobra`.
 
 ## Configuration
 

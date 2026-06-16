@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"bitbucket-cli/config"
+	"github.com/dtonair/bitbucket-cli/config"
 )
 
 // roundTripFunc lets a test stand in for an http.RoundTripper.
