@@ -1,12 +1,17 @@
-// Package config resolves Bitbucket credentials and repo defaults from
-// environment variables, with optional fallback to the local git remote for
-// the default workspace/repo. No config file is read.
+// Package config resolves Bitbucket credentials and repo defaults from, in
+// order of precedence: environment variables, a YAML config file
+// (~/.config/bitbucket-cli.yaml by default), and finally the local git remote
+// for the default workspace/repo.
 package config
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Config holds resolved Bitbucket credentials and optional repo defaults.
@@ -29,25 +34,156 @@ type ResolvedRepoRef struct {
 	RepoSlug  string
 }
 
+// FileConfig mirrors the YAML config file. All fields are optional and act as
+// fallbacks for the corresponding environment variables.
+type FileConfig struct {
+	Email            string `yaml:"email,omitempty"`
+	APIToken         string `yaml:"api_token,omitempty"`
+	DefaultWorkspace string `yaml:"default_workspace,omitempty"`
+	DefaultRepo      string `yaml:"default_repo,omitempty"`
+}
+
+// FileKeys are the keys settable in the config file, in display order.
+var FileKeys = []string{"email", "api_token", "default_workspace", "default_repo"}
+
+func (fc *FileConfig) field(key string) (*string, error) {
+	switch key {
+	case "email":
+		return &fc.Email, nil
+	case "api_token":
+		return &fc.APIToken, nil
+	case "default_workspace":
+		return &fc.DefaultWorkspace, nil
+	case "default_repo":
+		return &fc.DefaultRepo, nil
+	default:
+		return nil, fmt.Errorf("unknown config key %q (valid keys: %s)", key, strings.Join(FileKeys, ", "))
+	}
+}
+
+// Get returns the stored value for key.
+func (fc FileConfig) Get(key string) (string, error) {
+	p, err := (&fc).field(key)
+	if err != nil {
+		return "", err
+	}
+	return *p, nil
+}
+
+// Set assigns value (trimmed) to key.
+func (fc *FileConfig) Set(key, value string) error {
+	p, err := fc.field(key)
+	if err != nil {
+		return err
+	}
+	*p = strings.TrimSpace(value)
+	return nil
+}
+
+// DefaultConfigPath returns the config file location, honoring BITBUCKET_CONFIG
+// from env, then XDG_CONFIG_HOME, falling back to ~/.config/bitbucket-cli.yaml.
+func DefaultConfigPath(env map[string]string) string {
+	if p := trimmed(env, "BITBUCKET_CONFIG"); p != "" {
+		return p
+	}
+	if dir := trimmed(env, "XDG_CONFIG_HOME"); dir != "" {
+		return filepath.Join(dir, "bitbucket-cli.yaml")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".config", "bitbucket-cli.yaml")
+}
+
+// LoadFileConfig reads and parses the YAML config at path. A missing file
+// yields an empty FileConfig and no error; malformed YAML is an error. An empty
+// path returns an empty FileConfig.
+func LoadFileConfig(path string) (FileConfig, error) {
+	if strings.TrimSpace(path) == "" {
+		return FileConfig{}, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return FileConfig{}, nil
+		}
+		return FileConfig{}, fmt.Errorf("read config file %s: %w", path, err)
+	}
+	var fc FileConfig
+	if err := yaml.Unmarshal(data, &fc); err != nil {
+		return FileConfig{}, fmt.Errorf("parse config file %s: %w", path, err)
+	}
+	return fc, nil
+}
+
+// WriteFileConfig writes fc as YAML to path, creating parent directories. The
+// file is written with 0600 permissions since it may hold an API token.
+func WriteFileConfig(path string, fc FileConfig) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("no config file path")
+	}
+	if dir := filepath.Dir(path); dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("create config dir: %w", err)
+		}
+	}
+	data, err := yaml.Marshal(fc)
+	if err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write config file %s: %w", path, err)
+	}
+	return nil
+}
+
+// SetFileValue loads the config at path, sets key to value, and writes it back,
+// preserving the file's other values.
+func SetFileValue(path, key, value string) error {
+	fc, err := LoadFileConfig(path)
+	if err != nil {
+		return err
+	}
+	if err := fc.Set(key, value); err != nil {
+		return err
+	}
+	return WriteFileConfig(path, fc)
+}
+
 func trimmed(env map[string]string, key string) string {
 	return strings.TrimSpace(env[key])
 }
 
-// LoadConfig builds a Config from the given environment map. gitCwd is the
-// directory used for git remote auto-detection of the default workspace/repo
-// (pass "" for the current process directory). Email and API token are
-// required; everything else is optional. Git detection only fills defaults
-// that the environment did not provide.
-func LoadConfig(env map[string]string, gitCwd string) (Config, error) {
-	email := trimmed(env, "BITBUCKET_EMAIL")
-	apiToken := trimmed(env, "BITBUCKET_API_TOKEN")
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
 
-	if email == "" || apiToken == "" {
-		return Config{}, fmt.Errorf("Set BITBUCKET_EMAIL and BITBUCKET_API_TOKEN before using bitbucket-cli.")
+// LoadConfig builds a Config from the given environment map, the YAML config
+// file at configPath (pass "" to skip), and the local git remote. gitCwd is the
+// directory used for git remote auto-detection of the default workspace/repo
+// (pass "" for the current process directory). Precedence is env > file > git.
+// Email and API token are required; everything else is optional.
+func LoadConfig(env map[string]string, gitCwd, configPath string) (Config, error) {
+	file, err := LoadFileConfig(configPath)
+	if err != nil {
+		return Config{}, err
 	}
 
-	workspace := trimmed(env, "BITBUCKET_DEFAULT_WORKSPACE")
-	repo := trimmed(env, "BITBUCKET_DEFAULT_REPO")
+	email := firstNonEmpty(env["BITBUCKET_EMAIL"], file.Email)
+	apiToken := firstNonEmpty(env["BITBUCKET_API_TOKEN"], file.APIToken)
+
+	if email == "" || apiToken == "" {
+		return Config{}, fmt.Errorf("Set BITBUCKET_EMAIL and BITBUCKET_API_TOKEN (via environment or %s) before using bitbucket-cli.", configHint(configPath))
+	}
+
+	workspace := firstNonEmpty(env["BITBUCKET_DEFAULT_WORKSPACE"], file.DefaultWorkspace)
+	repo := firstNonEmpty(env["BITBUCKET_DEFAULT_REPO"], file.DefaultRepo)
 
 	if workspace == "" || repo == "" {
 		if ref, ok := GitRepoRefFrom(gitCwd); ok {
@@ -66,6 +202,13 @@ func LoadConfig(env map[string]string, gitCwd string) (Config, error) {
 		DefaultWorkspace: workspace,
 		DefaultRepo:      repo,
 	}, nil
+}
+
+func configHint(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return "a config file"
+	}
+	return path
 }
 
 // GitRepoRefFrom inspects the `origin` remote in gitCwd and returns the

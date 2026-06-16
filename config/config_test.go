@@ -1,10 +1,140 @@
 package config
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func writeConfigFile(t *testing.T, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "bitbucket-cli.yaml")
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+	return path
+}
+
+func TestLoadConfigFromFile(t *testing.T) {
+	path := writeConfigFile(t, `email: file@example.com
+api_token: file-token
+default_workspace: file-workspace
+default_repo: file-repo
+`)
+	cfg, err := LoadConfig(map[string]string{}, t.TempDir(), path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := Config{Email: "file@example.com", APIToken: "file-token", DefaultWorkspace: "file-workspace", DefaultRepo: "file-repo"}
+	if cfg != want {
+		t.Fatalf("got %+v want %+v", cfg, want)
+	}
+}
+
+func TestEnvOverridesFile(t *testing.T) {
+	path := writeConfigFile(t, `email: file@example.com
+api_token: file-token
+default_workspace: file-workspace
+default_repo: file-repo
+`)
+	cfg, err := LoadConfig(map[string]string{
+		"BITBUCKET_EMAIL":             "env@example.com",
+		"BITBUCKET_DEFAULT_WORKSPACE": "env-workspace",
+	}, t.TempDir(), path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Email != "env@example.com" || cfg.DefaultWorkspace != "env-workspace" {
+		t.Fatalf("env should override file: %+v", cfg)
+	}
+	if cfg.APIToken != "file-token" || cfg.DefaultRepo != "file-repo" {
+		t.Fatalf("file should fill gaps: %+v", cfg)
+	}
+}
+
+func TestLoadConfigMissingFileIsNotAnError(t *testing.T) {
+	cfg, err := LoadConfig(map[string]string{
+		"BITBUCKET_EMAIL":     "dev@example.com",
+		"BITBUCKET_API_TOKEN": "token",
+	}, t.TempDir(), filepath.Join(t.TempDir(), "does-not-exist.yaml"))
+	if err != nil {
+		t.Fatalf("missing config file should be ignored, got: %v", err)
+	}
+	if cfg.Email != "dev@example.com" {
+		t.Fatalf("got %+v", cfg)
+	}
+}
+
+func TestLoadConfigMalformedFileErrors(t *testing.T) {
+	path := writeConfigFile(t, "email: [unterminated\n")
+	_, err := LoadConfig(map[string]string{}, t.TempDir(), path)
+	if err == nil {
+		t.Fatal("expected error for malformed YAML")
+	}
+	if !strings.Contains(err.Error(), "parse config file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSetFileValueRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "bitbucket-cli.yaml")
+	if err := SetFileValue(path, "email", "  me@example.com  "); err != nil {
+		t.Fatalf("set email: %v", err)
+	}
+	if err := SetFileValue(path, "api_token", "tok"); err != nil {
+		t.Fatalf("set api_token: %v", err)
+	}
+	fc, err := LoadFileConfig(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if fc.Email != "me@example.com" {
+		t.Fatalf("email not trimmed/stored: %q", fc.Email)
+	}
+	if fc.APIToken != "tok" {
+		t.Fatalf("setting api_token clobbered email or failed: %+v", fc)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("config file perms = %o, want 600", perm)
+	}
+}
+
+func TestSetFileValueRejectsUnknownKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bitbucket-cli.yaml")
+	err := SetFileValue(path, "bogus", "x")
+	if err == nil {
+		t.Fatal("expected error for unknown key")
+	}
+	if !strings.Contains(err.Error(), "unknown config key") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatal("file should not be created when the key is invalid")
+	}
+}
+
+func TestFileConfigGetUnknownKey(t *testing.T) {
+	var fc FileConfig
+	if _, err := fc.Get("bogus"); err == nil {
+		t.Fatal("expected error for unknown key")
+	}
+}
+
+func TestDefaultConfigPath(t *testing.T) {
+	if got := DefaultConfigPath(map[string]string{"BITBUCKET_CONFIG": "/custom/path.yaml"}); got != "/custom/path.yaml" {
+		t.Fatalf("BITBUCKET_CONFIG not honored: %q", got)
+	}
+	if got := DefaultConfigPath(map[string]string{"XDG_CONFIG_HOME": "/xdg"}); got != "/xdg/bitbucket-cli.yaml" {
+		t.Fatalf("XDG_CONFIG_HOME not honored: %q", got)
+	}
+}
 
 func TestLoadConfigFromEnv(t *testing.T) {
 	cfg, err := LoadConfig(map[string]string{
@@ -12,7 +142,7 @@ func TestLoadConfigFromEnv(t *testing.T) {
 		"BITBUCKET_API_TOKEN":         "token",
 		"BITBUCKET_DEFAULT_WORKSPACE": "team",
 		"BITBUCKET_DEFAULT_REPO":      "repo",
-	}, t.TempDir())
+	}, t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -23,7 +153,7 @@ func TestLoadConfigFromEnv(t *testing.T) {
 }
 
 func TestLoadConfigMissingCredentials(t *testing.T) {
-	_, err := LoadConfig(map[string]string{}, t.TempDir())
+	_, err := LoadConfig(map[string]string{}, t.TempDir(), "")
 	if err == nil {
 		t.Fatal("expected error for missing credentials")
 	}
@@ -38,7 +168,7 @@ func TestLoadConfigTrimsAndTreatsEmptyAsUnset(t *testing.T) {
 		"BITBUCKET_API_TOKEN":         "token",
 		"BITBUCKET_DEFAULT_WORKSPACE": "   ",
 		"BITBUCKET_DEFAULT_REPO":      "",
-	}, t.TempDir())
+	}, t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -100,7 +230,7 @@ func TestLoadConfigFillsDefaultsFromGit(t *testing.T) {
 	cfg, err := LoadConfig(map[string]string{
 		"BITBUCKET_EMAIL":     "dev@example.com",
 		"BITBUCKET_API_TOKEN": "token",
-	}, dir)
+	}, dir, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -116,7 +246,7 @@ func TestEnvDefaultsOverrideGit(t *testing.T) {
 		"BITBUCKET_API_TOKEN":         "token",
 		"BITBUCKET_DEFAULT_WORKSPACE": "env-workspace",
 		"BITBUCKET_DEFAULT_REPO":      "env-repo",
-	}, dir)
+	}, dir, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

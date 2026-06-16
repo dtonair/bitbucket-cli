@@ -34,18 +34,46 @@ go build -o bitbucket-cli .      # local binary
 go install .                     # into $GOBIN
 ```
 
-The only third-party dependency is `spf13/cobra`.
+The only third-party dependencies are `spf13/cobra` and `gopkg.in/yaml.v3`.
 
 ## Configuration
 
-Credentials and defaults are read from environment variables only (no config
-file):
+Credentials and defaults are resolved with the following precedence:
+**environment variables → config file → git remote auto-detection**.
+
+### Environment variables
 
 ```bash
 export BITBUCKET_EMAIL="you@example.com"
 export BITBUCKET_API_TOKEN="your-atlassian-api-token"
 export BITBUCKET_DEFAULT_WORKSPACE="workspace-slug"   # optional
 export BITBUCKET_DEFAULT_REPO="repository-slug"        # optional
+```
+
+### Config file
+
+Any value not set in the environment is read from a YAML config file at
+`~/.config/bitbucket-cli.yaml` (or `$XDG_CONFIG_HOME/bitbucket-cli.yaml`).
+Override the path with `BITBUCKET_CONFIG`.
+
+```yaml
+# ~/.config/bitbucket-cli.yaml
+email: you@example.com
+api_token: your-atlassian-api-token
+default_workspace: workspace-slug   # optional
+default_repo: repository-slug       # optional
+```
+
+All keys are optional; environment variables take precedence over file values.
+Manage the file with the `config` command instead of editing it by hand:
+
+```bash
+bitbucket-cli config set email you@example.com
+bitbucket-cli config set api_token your-atlassian-api-token
+bitbucket-cli config set default_workspace workspace-slug
+bitbucket-cli config get default_workspace
+bitbucket-cli config list          # API token redacted
+bitbucket-cli config path          # print the resolved file path
 ```
 
 The token must be an Atlassian API token with access to the target workspace.
@@ -61,6 +89,10 @@ and repo are auto-detected. Override per command with `--workspace`/`--repo`.
 | Command | Description |
 | --- | --- |
 | `status` | Report config validity and default repo |
+| `config set <key> <value>` | Write a value to the config file |
+| `config get <key>` | Print a stored config value |
+| `config list` | Show stored config (API token redacted) |
+| `config path` | Print the config file path |
 | `repo get` | Repository details |
 | `pr list [--state OPEN\|MERGED\|DECLINED\|SUPERSEDED] [--limit N]` | List pull requests |
 | `pr get <id>` | One pull request |
@@ -100,8 +132,9 @@ bitbucket-cli --workspace acme --repo web pr list
 
 ## Security
 
-Credentials are read from environment variables only and are never logged or
-echoed. Do not commit tokens or `.env` files.
+Credentials are read from environment variables or the config file and are
+never logged or echoed. Do not commit tokens, `.env` files, or a config file
+containing a real API token (`chmod 600` it and keep it out of version control).
 
 ## Testing
 

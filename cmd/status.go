@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dtonair/bitbucket-cli/config"
 	"github.com/dtonair/bitbucket-cli/output"
 
 	"github.com/spf13/cobra"
@@ -17,7 +16,7 @@ func init() {
 		Long:  "Report whether credentials resolve from the environment and which default repository is in effect.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.LoadConfig(envMap(), "")
+			cfg, err := loadConfig()
 			if err != nil {
 				return fail(err)
 			}

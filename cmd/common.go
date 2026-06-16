@@ -32,9 +32,16 @@ func envMap() map[string]string {
 	return m
 }
 
-// newClient loads config from the environment and builds a Bitbucket client.
+// loadConfig resolves config from the environment, the YAML config file, and
+// the local git remote.
+func loadConfig() (config.Config, error) {
+	env := envMap()
+	return config.LoadConfig(env, "", config.DefaultConfigPath(env))
+}
+
+// newClient loads config and builds a Bitbucket client.
 func newClient() (config.Config, *bitbucket.Client, error) {
-	cfg, err := config.LoadConfig(envMap(), "")
+	cfg, err := loadConfig()
 	if err != nil {
 		return config.Config{}, nil, err
 	}
