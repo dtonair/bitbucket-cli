@@ -78,7 +78,7 @@ bitbucket-cli config path          # print the resolved file path
 
 The token must be an Atlassian API token with access to the target workspace.
 Recommended scopes: `read:repository:bitbucket`, `read:pullrequest:bitbucket`,
-and `write:pullrequest:bitbucket` to post PR comments.
+and `write:pullrequest:bitbucket` to create/update PRs and post comments.
 
 If `BITBUCKET_DEFAULT_WORKSPACE`/`BITBUCKET_DEFAULT_REPO` are unset and you run
 inside a git repository whose `origin` points at `bitbucket.org`, the workspace
@@ -99,6 +99,8 @@ and repo are auto-detected. Override per command with `--workspace`/`--repo`.
 | `pr comments <id> [--limit N]` | Pull request comments |
 | `pr commits <id> [--limit N]` | Pull request commits |
 | `pr comment <id> --body <markdown>` | Post a markdown comment (write) |
+| `pr create --source <branch> --title <t> [...]` | Create a pull request (write) |
+| `pr update <id> [--title <t>] [--description ...]` | Update a PR's title/description (write) |
 | `branch list [--query <q>] [--limit N]` | List branches |
 
 Global flags: `--workspace`, `--repo`, `--pretty`. Default `--limit` is 20.
@@ -117,6 +119,18 @@ bitbucket-cli pr list --pretty
 
 # Post a comment (only run when explicitly asked to post)
 bitbucket-cli pr comment 123 --body "Thanks, I will take a look."
+
+# Create a pull request (write — only run when explicitly asked)
+bitbucket-cli pr create --source feature/login --title "Add login" \
+  --description "Implements the login flow."
+# destination defaults to the repo main branch; override with --destination
+# long descriptions: pipe markdown via stdin
+generate-summary | bitbucket-cli pr create --source feature/login \
+  --title "Add login" --description-file -
+
+# Update a PR's description (write); reviewers are preserved
+bitbucket-cli pr update 123 --description-file release-notes.md
+bitbucket-cli pr update 123 --title "Add login (v2)"
 
 # Override the target repo
 bitbucket-cli --workspace acme --repo web pr list
