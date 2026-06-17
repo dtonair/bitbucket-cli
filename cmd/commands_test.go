@@ -7,11 +7,27 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// resetFlags clears flag values and their `Changed` markers across the command
+// tree. cobra reuses the rootCmd singleton between Execute() calls, so flag
+// state otherwise leaks from one test into the next.
+func resetFlags(cmd *cobra.Command) {
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		_ = f.Value.Set(f.DefValue)
+		f.Changed = false
+	})
+	for _, sub := range cmd.Commands() {
+		resetFlags(sub)
+	}
+}
 
 func jsonResp(status int, body string) *http.Response {
 	return &http.Response{
@@ -33,6 +49,7 @@ func run(t *testing.T, transport roundTripFunc, args ...string) (string, error) 
 
 	// Reset global flag state between runs.
 	flagWorkspace, flagRepo, flagPretty = "", "", false
+	resetFlags(rootCmd)
 	testTransport = transport
 	t.Cleanup(func() { testTransport = nil })
 
