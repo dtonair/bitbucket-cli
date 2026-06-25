@@ -81,11 +81,14 @@ func TestStatusJSON(t *testing.T) {
 }
 
 func TestStatusMissingCredsFails(t *testing.T) {
-	os.Unsetenv("BITBUCKET_EMAIL")
-	t.Setenv("BITBUCKET_API_TOKEN", "token")
-	// Explicitly clear email even though Setenv above set token.
+	t.Setenv("BITBUCKET_CONFIG", t.TempDir()+"/missing.yaml")
 	t.Setenv("BITBUCKET_EMAIL", "")
+	t.Setenv("BITBUCKET_API_TOKEN", "token")
+	t.Setenv("BITBUCKET_DEFAULT_WORKSPACE", "")
+	t.Setenv("BITBUCKET_DEFAULT_REPO", "")
+
 	flagWorkspace, flagRepo, flagPretty = "", "", false
+	resetFlags(rootCmd)
 	rootCmd.SetArgs([]string{"status"})
 	if err := rootCmd.Execute(); err == nil {
 		t.Fatal("expected error when credentials missing")
@@ -189,8 +192,11 @@ func TestPRCommentPostsBody(t *testing.T) {
 		t.Fatalf("body not json: %v", err)
 	}
 	content := sent["content"].(map[string]any)
-	if content["raw"] != "Looks good" || content["markup"] != "markdown" {
+	if content["raw"] != "Looks good" {
 		t.Fatalf("unexpected body: %s", gotBody)
+	}
+	if _, has := content["markup"]; has {
+		t.Fatalf("comment body must not send content.markup: %s", gotBody)
 	}
 	if strings.TrimSpace(out) != "Posted comment #99 on pull request #123." {
 		t.Fatalf("unexpected output: %q", out)

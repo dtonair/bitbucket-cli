@@ -39,7 +39,7 @@ func init() {
 			}
 
 			payload := map[string]any{
-				"content": map[string]any{"raw": body, "markup": "markdown"},
+				"content": map[string]any{"raw": body},
 			}
 			var raw json.RawMessage
 			path := fmt.Sprintf("%s/pullrequests/%d/comments", base, id)
