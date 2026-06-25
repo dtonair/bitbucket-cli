@@ -162,6 +162,9 @@ func TestPRCreatePostsBody(t *testing.T) {
 	if sent["title"] != "Add feature" || sent["description"] != "body text" {
 		t.Fatalf("unexpected body: %s", body)
 	}
+	if _, has := sent["content"]; has {
+		t.Fatalf("create body must not send content; Bitbucket rejects content.markup: %s", body)
+	}
 	if sent["close_source_branch"] != true {
 		t.Fatalf("expected close_source_branch true: %s", body)
 	}
