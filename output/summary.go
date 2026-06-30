@@ -1,6 +1,9 @@
 package output
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // These helpers reproduce the exact text summaries emitted by the original Pi
 // extension's tools, operating on decoded JSON objects (map[string]any).
@@ -75,6 +78,64 @@ func BranchSummary(branch map[string]any) string {
 	return "unknown"
 }
 
+// PipelineSummary renders "#<build_number> <state> [<result>] <branch> <trigger> <duration>".
+// For running pipelines (no result), the result field is omitted.
+// Duration is formatted as "XmYs" or "Ys" or "-" when unavailable.
+func PipelineSummary(pipeline map[string]any) string {
+	buildNum := "?"
+	if v, ok := pipeline["build_number"]; ok {
+		buildNum = fmt.Sprintf("%v", numberish(v))
+	}
+
+	stateName := "UNKNOWN"
+	if state, ok := pipeline["state"].(map[string]any); ok {
+		if s, ok2 := str(state, "name"); ok2 && s != "" {
+			stateName = s
+		}
+	}
+
+	resultName := ""
+	if state, ok := pipeline["state"].(map[string]any); ok {
+		if result, ok2 := state["result"].(map[string]any); ok2 {
+			if s, ok3 := str(result, "name"); ok3 && s != "" {
+				resultName = s
+			}
+		}
+	}
+
+	branch := "?"
+	if target, ok := pipeline["target"].(map[string]any); ok {
+		if s, ok2 := str(target, "ref_name"); ok2 && s != "" {
+			branch = s
+		}
+	}
+
+	trigger := "unknown"
+	if tr, ok := pipeline["trigger"].(map[string]any); ok {
+		if s, ok2 := str(tr, "name"); ok2 && s != "" {
+			trigger = s
+		}
+	}
+
+	dur := "-"
+	if d, ok := pipeline["duration_in_seconds"]; ok {
+		if seconds, ok2 := d.(float64); ok2 && seconds > 0 {
+			m := int(seconds) / 60
+			s := int(seconds) % 60
+			if m > 0 {
+				dur = fmt.Sprintf("%dm%ds", m, s)
+			} else {
+				dur = fmt.Sprintf("%ds", s)
+			}
+		}
+	}
+
+	if resultName != "" {
+		return fmt.Sprintf("#%s %s %s %s %s %s", buildNum, stateName, resultName, branch, trigger, dur)
+	}
+	return fmt.Sprintf("#%s %s %s %s %s", buildNum, stateName, branch, trigger, dur)
+}
+
 // RepoSummary renders "Repository: <full_name|name|unknown>".
 func RepoSummary(repo map[string]any) string {
 	if full, ok := str(repo, "full_name"); ok && full != "" {
@@ -84,6 +145,137 @@ func RepoSummary(repo map[string]any) string {
 		return "Repository: " + name
 	}
 	return "Repository: unknown"
+}
+
+// StepGlyph returns a single-character glyph representing a pipeline step's
+// state: ✓ (successful), ✗ (failed), ● (pending/in-progress), ○ (other).
+func StepGlyph(state map[string]any) string {
+	if result, ok := state["result"].(map[string]any); ok {
+		switch result["name"] {
+		case "SUCCESSFUL":
+			return "✓"
+		case "FAILED":
+			return "✗"
+		case "STOPPED", "EXPIRED":
+			return "○"
+		}
+	}
+	switch state["name"] {
+	case "PENDING", "IN_PROGRESS":
+		return "●"
+	default:
+		return "○"
+	}
+}
+
+// PipelineGetSummary renders a multi-line summary of a single pipeline with
+// its steps. The pipeline map is the pipeline API response; steps is the list
+// of step objects (may be empty).
+func PipelineGetSummary(pipeline map[string]any, steps []map[string]any) string {
+	var b strings.Builder
+
+	buildNum := "?"
+	if v, ok := pipeline["build_number"]; ok {
+		buildNum = fmt.Sprintf("%v", numberish(v))
+	}
+	fmt.Fprintf(&b, "Pipeline #%s\n", buildNum)
+
+	// State line.
+	stateName := "UNKNOWN"
+	resultName := ""
+	if state, ok := pipeline["state"].(map[string]any); ok {
+		if s, ok2 := str(state, "name"); ok2 && s != "" {
+			stateName = s
+		}
+		if result, ok2 := state["result"].(map[string]any); ok2 {
+			if s, ok3 := str(result, "name"); ok3 && s != "" {
+				resultName = s
+			}
+		}
+	}
+	if resultName != "" {
+		fmt.Fprintf(&b, "  State: %s (%s)\n", stateName, resultName)
+	} else {
+		fmt.Fprintf(&b, "  State: %s\n", stateName)
+	}
+
+	// Branch / commit.
+	if target, ok := pipeline["target"].(map[string]any); ok {
+		if s, ok2 := str(target, "ref_name"); ok2 {
+			fmt.Fprintf(&b, "  Branch: %s\n", s)
+		}
+		if commit, ok2 := target["commit"].(map[string]any); ok2 {
+			if hash, ok3 := str(commit, "hash"); ok3 && hash != "" {
+				if len(hash) > 12 {
+					hash = hash[:12]
+				}
+				fmt.Fprintf(&b, "  Commit: %s\n", hash)
+			}
+		}
+	}
+
+	// Trigger.
+	if tr, ok := pipeline["trigger"].(map[string]any); ok {
+		if s, ok2 := str(tr, "name"); ok2 && s != "" {
+			fmt.Fprintf(&b, "  Trigger: %s\n", s)
+		}
+	}
+
+	// Created.
+	if s, ok := str(pipeline, "created_on"); ok && s != "" {
+		fmt.Fprintf(&b, "  Created: %s\n", s)
+	}
+
+	// Duration.
+	if d, ok := pipeline["duration_in_seconds"]; ok {
+		if seconds, ok2 := d.(float64); ok2 && seconds > 0 {
+			m := int(seconds) / 60
+			s := int(seconds) % 60
+			if m > 0 {
+				fmt.Fprintf(&b, "  Duration: %dm%ds\n", m, s)
+			} else {
+				fmt.Fprintf(&b, "  Duration: %ds\n", s)
+			}
+		}
+	}
+
+	// Steps section.
+	fmt.Fprintf(&b, "\nSteps (%d):\n", len(steps))
+	if len(steps) == 0 {
+		fmt.Fprint(&b, "  (none)\n")
+	} else {
+		for _, step := range steps {
+			glyph := StepGlyph(stepState(step))
+			name, _ := str(step, "name")
+			stepStateName := ""
+			stepResultName := ""
+			if st, ok := step["state"].(map[string]any); ok {
+				if s, ok2 := str(st, "name"); ok2 {
+					stepStateName = s
+				}
+				if result, ok2 := st["result"].(map[string]any); ok2 {
+					if s, ok3 := str(result, "name"); ok3 {
+						stepResultName = s
+					}
+				}
+			}
+			if stepResultName != "" {
+				fmt.Fprintf(&b, "  %s %-30s (%s %s)\n", glyph, name, stepStateName, stepResultName)
+			} else {
+				fmt.Fprintf(&b, "  %s %-30s (%s)\n", glyph, name, stepStateName)
+			}
+		}
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// stepState extracts the "state" sub-object from a step map, or returns nil.
+func stepState(step map[string]any) map[string]any {
+	if state, ok := step["state"].(map[string]any); ok {
+		return state
+	}
+	return nil
 }
 
 // numberish normalizes JSON numbers (float64) to integers for display when

@@ -1,6 +1,6 @@
 ---
 name: bitbucket-cli
-description: "Drive Bitbucket Cloud (pull requests, branches, repo info) from the command line via the `bitbucket-cli` tool. Use when the user asks to list/read/create/update/comment on Bitbucket pull requests, inspect branches or repository details, or otherwise interact with Bitbucket Cloud — and a Bitbucket repo (not GitHub) is in play."
+description: "Drive Bitbucket Cloud (pull requests, branches, repo info) from the command line via the `bitbucket-cli` tool. Use when the user asks to list/read/create/update/comment on Bitbucket pull requests, inspect review feedback, fix requested changes, inspect branches or repository details, or otherwise interact with Bitbucket Cloud — and a Bitbucket repo (not GitHub) is in play."
 ---
 
 # Driving Bitbucket Cloud with `bitbucket-cli`
@@ -47,6 +47,23 @@ bitbucket-cli repo get                      # repository details
 ```
 
 Pipe JSON into `jq` to extract fields, e.g. `bitbucket-cli pr list --state OPEN | jq '.[].id'`.
+
+## Review-fix workflow
+
+When the user asks you to check review feedback and fix it, always add a notes step
+before editing code:
+
+1. Read the PR and review context with `bitbucket-cli pr get <id>` and
+   `bitbucket-cli pr comments <id>`. Use `bitbucket-cli pr commits <id>` when branch
+   context is needed.
+2. Create a dated note under `~/code/brain/spec/YYYYMMDD/`, following the same
+   sequential numbering pattern as `~/code/skills/` specs:
+   `<weight>_task_<title>.md`.
+3. In the note, capture the requested changes, affected files, implementation steps,
+   and verification commands. Keep it lightweight; this is the working record for the
+   review-fix pass.
+4. Implement the fixes, run verification, and summarize which review items were
+   addressed. Only post or update Bitbucket comments when the user explicitly asked.
 
 ## Write commands (only when the user explicitly asks)
 
